@@ -8,7 +8,7 @@ module.exports = {
     libraryTarget: 'umd',
     path: path.resolve(__dirname, 'dist'),
     publicPath: '/dist/',
-    filename: 'aframe-master.js'
+    filename: 'aframe-v1.4.2.mifly.js'
   },
   devtool: 'source-map',
   mode: 'development',
