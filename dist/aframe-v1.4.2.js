@@ -3495,6 +3495,14 @@ TextLayout.prototype.update = function (opt) {
       var id = text.charCodeAt(i);
       var glyph = self.getGlyph(font, id);
       if (glyph) {
+
+//[start-20201022- fei -0102-add]//      
+        //// 因為使用多個 font 需要增加判斷空白
+        if ( (id == TAB_ID || id == SPACE_ID) && glyph.char != " " ){
+          continue;
+        }
+//[end---20201022- fei -0102-add]//
+
         if (lastGlyph) x += getKerning(font, lastGlyph.id, glyph.id);
         var tx = x;
         if (align === ALIGN_CENTER) tx += (maxLineWidth - lineWidth) / 2;else if (align === ALIGN_RIGHT) tx += maxLineWidth - lineWidth;

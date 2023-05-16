@@ -2988,7 +2988,11 @@ class GLTFParser {
 				isObjectURL = true;
 				const blob = new Blob( [ bufferView ], { type: sourceDef.mimeType } );
 				sourceURI = URL.createObjectURL( blob );
-				return sourceURI;
+				// return sourceURI;
+
+				let sourceURIObj = { suri: sourceURI, bufferView: bufferView };
+
+				return sourceURIObj;
 
 			} );
 
@@ -2998,9 +3002,70 @@ class GLTFParser {
 
 		}
 
-		const promise = Promise.resolve( sourceURI ).then( function ( sourceURI ) {
+		const promise = Promise.resolve( sourceURI ).then( function ( sourceURIObj ) {
+
+
+			let sourceURI = sourceURIObj.suri;
+
+			//[start-20220119- fei 0111- add]//
+
+			//// 因應眾多 GLTF 檔案的貼圖是 tga/bmp 格式。但是經驗上 gltf的 image mimeType 只會有 [ jpg, png ]的可能。
+			//// 這邊依照 「mimeType」來判斷是否為 jpg/png/tga/bmp 格式（後兩者基本上不可能發生，但是預先作）。假如是「未知格式」，則執行 header 檢查。
+			//// header 按順序檢查，通過的話使用對應的 loader  
+			//// 假如有判斷到 mineType ，則直接使用對應 loader
+
+			let doCheckImage = false;
+			let imageType = '';
+			switch ( sourceDef.mimeType ) {
+				case 'image/jpeg':
+				case 'image/jpg':
+				case 'jpg':
+				case 'jpeg':
+				console.log('GLTFParser: _loadTexture: _mimeType jpg: ', sourceDef );
+				imageType = 'jpg';
+				break;
+
+				case 'image/png':
+				case 'png':
+				console.log('GLTFParser: _loadTexture: _mimeType png: ', sourceDef );
+				imageType = 'png';
+				break;
+				
+				case 'image/tga':
+				case 'tga':
+				console.log('GLTFParser: _loadTexture: _mimeType tga: ', sourceDef );
+				imageType = 'tga';
+				break;
+				case 'image/bmp':
+				case 'bmp':
+				console.log('GLTFParser: _loadTexture: _mimeType bmp: ', sourceDef );
+				imageType = 'bmp';
+				break;
+
+				case 'image/unknown':
+				default:
+				console.log('GLTFParser: _loadTexture: _mimeType default: ', sourceDef );
+				doCheckImage = true;
+			}      
+			
+			//// 暫時放棄使用「副檔名」來判定
+			// if ( sourceDef.name ){
+			//   let fileNameList = sourceDef.name.split('.');
+			//   let subTitle = fileNameList[ fileNameList.length - 1 ].toLowerCase() ;
+			//   if ( subTitle == 'tga' ){
+			//     loader = tgaLoader;
+			//   }
+			// }
+
+			//[end---20220119- fei 0111- add]//
+
+
 
 			return new Promise( function ( resolve, reject ) {
+
+				//// 假如 mimeType = [ jpg/jpeg, png ]， 就不用「檢查TGA header」。
+				//// 假如 mimeType = [ tga, unknown ] 或是「不存在」，執行「檢查TGA header」，通過的話，使用 tgaLoader 假如沒有通過的話，維持用基本的 image loader
+
 
 				let onLoad = resolve;
 
@@ -3008,16 +3073,136 @@ class GLTFParser {
 
 					onLoad = function ( imageBitmap ) {
 
-						const texture = new Texture( imageBitmap );
-						texture.needsUpdate = true;
+						if ( imageBitmap.isTexture == true ){
+							resolve( imageBitmap );
+						}else{
+							const texture = new Texture( imageBitmap );
+							texture.needsUpdate = true;
 
-						resolve( texture );
+							resolve( texture );							
+						}
+
+						//// 原本的作法
+						// const texture = new Texture( imageBitmap );
+						// texture.needsUpdate = true;
+
+						// resolve( texture );
 
 					};
 
 				}
 
-				loader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+				// loader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+
+				let tgaLoader = new THREE.TGALoader( options.manager );
+
+				let BMPLoaderFromBlob = function( blobUrl, onload , onProgress, onError  ){
+          
+					let image = new Image();
+					image.onload = function(){
+						let texture = new THREE.Texture();
+						texture.image = image;
+						onload( texture );
+					}
+		  
+					image.onerror = onError;
+		
+					image.src = blobUrl;
+					// window.blobUrl = blobUrl;
+				
+				}
+
+
+				if ( doCheckImage == true ){
+
+					//// 這邊注記一個錯誤狀況， 2022 0121 時候，在 fei 的電腦使用 「 再次 FileLoader 取得buffer 然後再進入判斷標題 」 會出現未知的錯誤。
+					//// 這邊改為前面在取得 blob 同時 就回傳 buffer 。這邊直接使用
+		  
+					let buffer = sourceURIObj.bufferView;
+		  
+					// let fileLoader = new THREE.FileLoader( options.manager );
+					// fileLoader.setResponseType( 'arraybuffer' );
+					// fileLoader.load( resolveURL( sourceURI, options.path ) , function ( buffer ) {
+					  
+					function isPNG( content ){
+						if ( content.length < 10 ){
+						  	return false;
+						}
+						//// PNG => PNG, 0x89 0x50 0x4E 0x47, [ 137 , 80 , 78 , 71]
+						if ( content[0] == 137 && content[1] == 80 && content[1] == 78 && content[1] == 71  ){
+						  	return true;
+						}else{
+						  	return false;
+						}
+					}
+					function isJPG(){
+						if ( content.length < 10 ){
+						  	return false;
+						}
+						//// JPG => JPG, 0xff 0xd8 [ 255 , 216 ]
+						if ( content[0] == 255 && content[1] == 246 ){
+						  	return true;
+						}else{
+						  	return false;
+						}
+					}
+					function isBMP( content ){
+						if ( content.length < 10 ){
+						  	return false;
+						}
+						//// BMP => BM, 0x42 0x4D, [66, 77]
+						if ( content[0] == 66 && content[1] == 77 ){
+						  	return true;
+						}else{
+						  	return false;
+						}
+					}
+		  
+					let content = new Uint8Array( buffer );
+					// window.content = content;
+
+					// console.log( ' aaaaaaaa ' , loader );
+
+
+					if ( isJPG( content ) ){
+						console.log(' ****** detect JPG ');
+						loader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					} else if ( isPNG( content ) ) {
+						console.log(' ****** detect PNG ');
+						loader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					} else if ( tgaLoader.checkHeaderByBuffer( content ) ){
+						console.log(' ****** detect TGA ');
+						tgaLoader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					} else if ( isBMP( content ) ){
+						console.log(' ****** detect BMP ');
+						BMPLoaderFromBlob( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+						
+						// loader.load( resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					} else {
+						console.log(' ****** detect nothing ');
+						tgaLoader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					}
+		  
+				} else {
+					switch ( imageType ){
+					  	case 'png':
+					  	case 'jpg':
+							loader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					  		break;
+					  	case 'tga':
+							tgaLoader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					  		break;
+						case 'bmp':
+							BMPLoaderFromBlob( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+						// loader.load( resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+		  
+					  break;
+					  default: 
+						tgaLoader.load( LoaderUtils.resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					}
+
+				}
+
 
 			} );
 
@@ -3061,6 +3246,24 @@ class GLTFParser {
 		return this.getDependency( 'texture', mapDef.index ).then( function ( texture ) {
 
 			if ( ! texture ) return null;
+
+
+			//[start-20220119- fei 0111- add]//
+			if ( texture ){
+				if ( ! texture.isCompressedTexture ) {
+				  	switch ( mapName ) {
+						case 'aoMap':
+						case 'emissiveMap':
+						case 'metalnessMap':
+						case 'normalMap':
+						case 'roughnessMap':
+					  		texture.format = THREE.RGBFormat;
+					  	break;
+				  	}
+				}
+			}
+		  	//[end---20220119- fei 0111- add]//
+
 
 			// Materials sample aoMap from UV set 1 and other maps from UV set 0 - this can't be configured
 			// However, we will copy UV set 0 to UV set 1 on demand for aoMap
